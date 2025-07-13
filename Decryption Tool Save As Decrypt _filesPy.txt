@@ -1,0 +1,54 @@
+import os
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import PBKDF2
+
+# Same configuration as ransomware
+SALT = b'\x2a\x9f\xe4\x73\xc1\x8d\x0b\xf6'
+RANSOM_EXT = ".masked"
+
+def derive_key(password: str, salt: bytes) -> bytes:
+    return PBKDF2(password, salt, dkLen=32, count=500000)
+
+def unpad_data(data: bytes) -> bytes:
+    pad_len = data[-1]
+    return data[:-pad_len]
+
+def decrypt_file(key: bytes, enc_path: str):
+    with open(enc_path, 'rb') as f:
+        nonce = f.read(12)
+        tag = f.read(16)
+        ciphertext = f.read()
+    
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    try:
+        plaintext = unpad_data(cipher.decrypt_and_verify(ciphertext, tag))
+    except ValueError:
+        print("Decryption failed - wrong key or corrupted file")
+        return False
+    
+    original_path = enc_path.replace(RANSOM_EXT, '')
+    with open(original_path, 'wb') as f:
+        f.write(plaintext)
+    
+    os.remove(enc_path)
+    return True
+
+def main():
+    password = input("Enter decryption password: ")
+    key = derive_key(password, SALT)
+    
+    decrypted_count = 0
+    target_dir = input("Directory to decrypt [default: /storage/emulated]: ") or "/storage/emulated"
+    
+    for root, _, files in os.walk(target_dir):
+        for file in files:
+            if file.endswith(RANSOM_EXT):
+                file_path = os.path.join(root, file)
+                if decrypt_file(key, file_path):
+                    print(f"🔓 Decrypted: {file}")
+                    decrypted_count += 1
+    
+    print(f"\n✅ {decrypted_count} files recovered")
+
+if __name__ == "__main__":
+    main()
